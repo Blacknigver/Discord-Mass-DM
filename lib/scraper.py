@@ -70,7 +70,6 @@ class Scraper:
         try:
             self.scrape()
             if not self.scraped:
-                # Retry fetching if no data was scraped
                 return self.fetch()
             return self.scraped
         except Exception:

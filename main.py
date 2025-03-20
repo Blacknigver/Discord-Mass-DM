@@ -6,24 +6,22 @@ import sys
 import subprocess
 import time
 import random
-import logging
-import asyncio
-from datetime import datetime
 
 try:
     import psutil
     from tasksio import TaskPool
     from lib.scraper import Scraper
     from aiohttp import ClientSession
+    import logging
+    import asyncio
+    from datetime import datetime
+    logging.basicConfig(
+        level=logging.INFO,
+        format="\x1b[38;5;9m[\x1b[0m%(asctime)s\x1b[38;5;9m]\x1b[0m %(message)s\x1b[0m",
+        datefmt="%H:%M:%S"
+    )
 except Exception as e:
     print(e)
-
-# Configure logging with ANSI colors for timestamps
-logging.basicConfig(
-    level=logging.INFO,
-    format="\x1b[38;5;9m[\x1b[0m%(asctime)s\x1b[38;5;9m]\x1b[0m %(message)s\x1b[0m",
-    datefmt="%H:%M:%S"
-)
 
 # Set console title and clear the screen
 os.system('title Discord Mass DM')
@@ -340,7 +338,6 @@ class Discord:
 
 
 if __name__ == "__main__":
-    # If requirements are not set via environment variable, execute the batch file and exit.
     if not os.getenv('requirements'):
         subprocess.Popen(['start', 'start.bat'], shell=True)
         sys.exit()
