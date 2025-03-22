@@ -53,8 +53,9 @@ class Discord:
         # Load tokens from environment variables
 self.tokens = []
 
-# Try loading multiple tokens from TOKEN_1, TOKEN_2, ..., TOKEN_10 (you can expand this range)
-for i in range(1, 11):
+# Load tokens from environment variables
+self.tokens = []
+for i in range(1, 11):  # TOKEN_1 to TOKEN_10
     token = os.getenv(f"TOKEN_{i}")
     if token:
         self.tokens.append(token)
@@ -63,15 +64,17 @@ if not self.tokens:
     logging.info("No tokens found in environment variables (TOKEN_1, TOKEN_2, ...). Exiting.")
     sys.exit()
 
-        logging.info(f"Successfully loaded \x1b[38;5;9m{len(self.tokens)}\x1b[0m token(s)\n")
-        self.invite = input("\x1b[38;5;9m[\x1b[0m?\x1b[38;5;9m] Invite \x1b[38;5;9m->\x1b[0m ")
-        self.message = input("\x1b[38;5;9m[\x1b[0m?\x1b[38;5;9m] Message \x1b[38;5;9m->\x1b[0m ").replace("\\n", "\n")
-        try:
-            self.delay = float(input("\x1b[38;5;9m[\x1b[0m?\x1b[38;5;9m] Delay \x1b[38;5;9m->\x1b[0m "))
-        except Exception:
-            self.delay = 0
+logging.info(f"Successfully loaded \x1b[38;5;9m{len(self.tokens)}\x1b[0m token(s)\n")
 
-        print()
+# Get invite, message, and delay from env vars
+self.invite = os.getenv("DISCORD_INVITE")
+self.message = os.getenv("DM_MESSAGE", "Hello!").replace("\\n", "\n")
+try:
+    self.delay = float(os.getenv("DM_DELAY", "0"))
+except Exception:
+    self.delay = 0
+
+print()
 
     def stop(self) -> None:
         """
