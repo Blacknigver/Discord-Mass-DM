@@ -15,6 +15,7 @@ try:
     import logging
     import asyncio
     from datetime import datetime
+    
     logging.basicConfig(
         level=logging.INFO,
         format="\x1b[38;5;9m[\x1b[0m%(asctime)s\x1b[38;5;9m]\x1b[0m %(message)s\x1b[0m",
@@ -23,8 +24,7 @@ try:
 except Exception as e:
     print(e)
 
-# Set console title and clear the screen (these are Windows commands, but won't break on Linux)
-os.system('title Discord Mass DM')
+# Clear screen (works on Windows and Linux; 'cls' is ignored on Linux)
 os.system('cls' if os.name == 'nt' else 'clear')
 
 def clear_screen() -> None:
@@ -39,11 +39,10 @@ class Discord:
     """
 
     def __init__(self) -> None:
-        # Define a cross-platform clear function
+        # Cross-platform clear function
         self.clear = (lambda: os.system("clear")) if sys.platform == "linux" else (lambda: os.system("cls"))
         self.clear()
 
-        # Type-hint for self.tokens
         self.tokens: list[str] = []
         self.guild_name: str | None = None
         self.guild_id: str | None = None
@@ -62,7 +61,7 @@ class Discord:
         logging.info(f"Successfully loaded \x1b[38;5;9m{len(self.tokens)}\x1b[0m token(s)\n")
 
         # --- GET INVITE, MESSAGE, AND DELAY FROM ENV VARS ---
-        self.invite = os.getenv("DISCORD_INVITE")  # Example: "abcdef" from "https://discord.gg/abcdef"
+        self.invite = os.getenv("DISCORD_INVITE")  # e.g. "abc123" from "discord.gg/abc123"
         self.message = os.getenv("DM_MESSAGE", "Hello!").replace("\\n", "\n")
         try:
             self.delay = float(os.getenv("DM_DELAY", "0"))
@@ -312,12 +311,14 @@ class Discord:
 
 
 if __name__ == "__main__":
-    # If you still have a 'requirements' env var check, remove or edit it if you want
-    if not os.getenv('requirements'):
-        # This code tries to run 'start.bat' – not needed on Linux
-        # You can safely remove it or comment it out
-        subprocess.Popen(['start', 'start.bat'], shell=True)
-        sys.exit()
+    # =====================
+    # Remove or comment out the lines below – they call start.bat and cause issues on Linux:
+    #
+    # if not os.getenv('requirements'):
+    #     subprocess.Popen(['start', 'start.bat'], shell=True)
+    #     sys.exit()
+    #
+    # =====================
 
     clear_screen()
     client = Discord()
