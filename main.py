@@ -23,17 +23,15 @@ try:
 except Exception as e:
     print(e)
 
-# Set console title and clear the screen
+# Set console title and clear the screen (these are Windows commands, but won't break on Linux)
 os.system('title Discord Mass DM')
 os.system('cls' if os.name == 'nt' else 'clear')
-
 
 def clear_screen() -> None:
     """
     Clears the terminal screen.
     """
     os.system('cls' if os.name == 'nt' else 'clear')
-
 
 class Discord:
     """
@@ -45,36 +43,33 @@ class Discord:
         self.clear = (lambda: os.system("clear")) if sys.platform == "linux" else (lambda: os.system("cls"))
         self.clear()
 
+        # Type-hint for self.tokens
         self.tokens: list[str] = []
         self.guild_name: str | None = None
         self.guild_id: str | None = None
         self.channel_id: str | None = None
 
-        # Load tokens from environment variables
-self.tokens = []
+        # --- LOAD TOKENS FROM ENVIRONMENT VARIABLES ---
+        for i in range(1, 11):  # TOKEN_1 through TOKEN_10
+            token = os.getenv(f"TOKEN_{i}")
+            if token:
+                self.tokens.append(token)
 
-# Load tokens from environment variables
-self.tokens = []
-for i in range(1, 11):  # TOKEN_1 to TOKEN_10
-    token = os.getenv(f"TOKEN_{i}")
-    if token:
-        self.tokens.append(token)
+        if not self.tokens:
+            logging.info("No tokens found in environment variables (TOKEN_1, TOKEN_2, ...). Exiting.")
+            sys.exit()
 
-if not self.tokens:
-    logging.info("No tokens found in environment variables (TOKEN_1, TOKEN_2, ...). Exiting.")
-    sys.exit()
+        logging.info(f"Successfully loaded \x1b[38;5;9m{len(self.tokens)}\x1b[0m token(s)\n")
 
-logging.info(f"Successfully loaded \x1b[38;5;9m{len(self.tokens)}\x1b[0m token(s)\n")
+        # --- GET INVITE, MESSAGE, AND DELAY FROM ENV VARS ---
+        self.invite = os.getenv("DISCORD_INVITE")  # Example: "abcdef" from "https://discord.gg/abcdef"
+        self.message = os.getenv("DM_MESSAGE", "Hello!").replace("\\n", "\n")
+        try:
+            self.delay = float(os.getenv("DM_DELAY", "0"))
+        except Exception:
+            self.delay = 0
 
-# Get invite, message, and delay from env vars
-self.invite = os.getenv("DISCORD_INVITE")
-self.message = os.getenv("DM_MESSAGE", "Hello!").replace("\\n", "\n")
-try:
-    self.delay = float(os.getenv("DM_DELAY", "0"))
-except Exception:
-    self.delay = 0
-
-print()
+        print()
 
     def stop(self) -> None:
         """
@@ -86,9 +81,6 @@ print()
     def nonce(self) -> str:
         """
         Generates a nonce value based on the current time.
-
-        Returns:
-            str: The generated nonce.
         """
         date = datetime.now()
         unixts = time.mktime(date.timetuple())
@@ -98,12 +90,6 @@ print()
     async def headers(self, token: str) -> dict:
         """
         Generates HTTP headers for Discord requests using cookies.
-
-        Args:
-            token (str): The Discord token.
-
-        Returns:
-            dict: A dictionary of HTTP headers.
         """
         async with ClientSession() as session:
             async with session.get("https://discord.com/app") as response:
@@ -124,17 +110,16 @@ print()
             "sec-fetch-site": "same-origin",
             "referer": "https://discord.com/channels/@me",
             "TE": "Trailers",
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
-                           "(KHTML, like Gecko) discord/1.0.9001 Chrome/83.0.4103.122 "
-                           "Electron/9.3.5 Safari/537.36")
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) discord/1.0.9001 Chrome/83.0.4103.122 "
+                "Electron/9.3.5 Safari/537.36"
+            )
         }
 
     async def login(self, token: str) -> None:
         """
         Attempts to log in with the given token.
-
-        Args:
-            token (str): The Discord token.
         """
         try:
             headers = await self.headers(token)
@@ -158,9 +143,6 @@ print()
     async def join(self, token: str) -> None:
         """
         Attempts to join a Discord server using an invite code.
-
-        Args:
-            token (str): The Discord token.
         """
         try:
             headers = await self.headers(token)
@@ -188,13 +170,6 @@ print()
     async def create_dm(self, token: str, user: str) -> str | bool:
         """
         Creates a direct message channel with a user.
-
-        Args:
-            token (str): The Discord token.
-            user (str): The user ID to DM.
-
-        Returns:
-            str | bool: The channel ID if successful, otherwise False.
         """
         try:
             headers = await self.headers(token)
@@ -203,10 +178,16 @@ print()
                 async with client.post(url, json={"recipients": [user]}) as response:
                     resp_json = await response.json()
                     if response.status == 200:
-                        logging.info(f"Successfully created DM with {resp_json['recipients'][0]['username']} \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(
+                            f"Successfully created DM with {resp_json['recipients'][0]['username']} "
+                            f"\x1b[38;5;9m({token[:59]})\x1b[0m"
+                        )
                         return resp_json["id"]
                     elif response.status in (401, 403):
-                        logging.info(f"Invalid account or cannot message user \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(
+                            f"Invalid account or cannot message user "
+                            f"\x1b[38;5;9m({token[:59]})\x1b[0m"
+                        )
                         self.tokens.remove(token)
                         return False
                     elif response.status == 429:
@@ -221,13 +202,6 @@ print()
     async def direct_message(self, token: str, channel: str) -> bool:
         """
         Sends a direct message to a specified channel.
-
-        Args:
-            token (str): The Discord token.
-            channel (str): The DM channel ID.
-
-        Returns:
-            bool: True if message was sent successfully, False otherwise.
         """
         try:
             headers = await self.headers(token)
@@ -265,10 +239,6 @@ print()
     async def send(self, token: str, user: str) -> None:
         """
         Sends a DM message to a user by creating a DM channel and sending the message.
-
-        Args:
-            token (str): The Discord token.
-            user (str): The user ID to DM.
         """
         channel = await self.create_dm(token, user)
         if channel is False:
@@ -342,7 +312,10 @@ print()
 
 
 if __name__ == "__main__":
+    # If you still have a 'requirements' env var check, remove or edit it if you want
     if not os.getenv('requirements'):
+        # This code tries to run 'start.bat' – not needed on Linux
+        # You can safely remove it or comment it out
         subprocess.Popen(['start', 'start.bat'], shell=True)
         sys.exit()
 
