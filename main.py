@@ -50,17 +50,18 @@ class Discord:
         self.guild_id: str | None = None
         self.channel_id: str | None = None
 
-        # Load tokens from file
-        try:
-            with open("data/tokens.txt", "r") as token_file:
-                for line in token_file:
-                    token = line.strip()
-                    if token:
-                        self.tokens.append(token)
-        except Exception:
-            open("data/tokens.txt", "a+").close()
-            logging.info("Please insert your tokens \x1b[38;5;9m(\x1b[0mtokens.txt\x1b[38;5;9m)\x1b[0m")
-            sys.exit()
+        # Load tokens from environment variables
+self.tokens = []
+
+# Try loading multiple tokens from TOKEN_1, TOKEN_2, ..., TOKEN_10 (you can expand this range)
+for i in range(1, 11):
+    token = os.getenv(f"TOKEN_{i}")
+    if token:
+        self.tokens.append(token)
+
+if not self.tokens:
+    logging.info("No tokens found in environment variables (TOKEN_1, TOKEN_2, ...). Exiting.")
+    sys.exit()
 
         logging.info(f"Successfully loaded \x1b[38;5;9m{len(self.tokens)}\x1b[0m token(s)\n")
         self.invite = input("\x1b[38;5;9m[\x1b[0m?\x1b[38;5;9m] Invite \x1b[38;5;9m->\x1b[0m ")
