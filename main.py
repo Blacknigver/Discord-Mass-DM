@@ -6,23 +6,21 @@ import sys
 import subprocess
 import time
 import random
+import logging
+import asyncio
+import aiohttp
+import psutil
 
-try:
-    import psutil
-    from tasksio import TaskPool
-    from lib.scraper import Scraper
-    from aiohttp import ClientSession
-    import logging
-    import asyncio
-    from datetime import datetime
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format="\x1b[38;5;9m[\x1b[0m%(asctime)s\x1b[38;5;9m]\x1b[0m %(message)s\x1b[0m",
-        datefmt="%H:%M:%S"
-    )
-except Exception as e:
-    print(e)
+from datetime import datetime
+from tasksio import TaskPool
+from lib.scraper import Scraper
+from aiohttp import ClientSession
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="\x1b[38;5;9m[\x1b[0m%(asctime)s\x1b[38;5;9m]\x1b[0m %(message)s\x1b[0m",
+    datefmt="%H:%M:%S"
+)
 
 # Clear screen (works on Windows and Linux; 'cls' is ignored on Linux)
 os.system('cls' if os.name == 'nt' else 'clear')
@@ -32,6 +30,87 @@ def clear_screen() -> None:
     Clears the terminal screen.
     """
     os.system('cls' if os.name == 'nt' else 'clear')
+
+# ----------------------------------------------------
+# CAPMONSTER HELPERS
+# ----------------------------------------------------
+
+CAPMONSTER_API_KEY = os.getenv("CAPMONSTER_API_KEY")
+
+async def solve_hcaptcha(site_key: str, page_url: str, rqdata: str = None) -> str:
+    """
+    Solve an hCaptcha challenge using CapMonster.Cloud API.
+    Returns the captcha solution token (captcha_key) or None if failed.
+    """
+    if not CAPMONSTER_API_KEY:
+        logging.error("CapMonster API key not found in environment. Cannot solve captcha.")
+        return None
+
+    try:
+        # Prepare the task creation payload
+        task_payload = {
+            "clientKey": CAPMONSTER_API_KEY,
+            "task": {
+                "type": "HCaptchaTaskProxyless",
+                "websiteURL": page_url,
+                "websiteKey": site_key
+            }
+        }
+
+        # If there's additional data (rqdata) from Discord (hCaptcha Enterprise), include it
+        if rqdata:
+            task_payload["task"]["enterprisePayload"] = {"rqdata": rqdata}
+            # Include a User-Agent similar to Discord's client
+            task_payload["task"]["userAgent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) discord/1.0.9001 Chrome/83.0.4103.122 "
+                "Electron/9.3.5 Safari/537.36"
+            )
+
+        async with aiohttp.ClientSession() as session:
+            # 1) Create the captcha task
+            create_resp = await session.post("https://api.capmonster.cloud/createTask", json=task_payload)
+            create_data = await create_resp.json()
+            if create_data.get("errorId") != 0:
+                logging.error(f"CapMonster createTask error: {create_data.get('errorDescription')}")
+                return None
+
+            task_id = create_data.get("taskId")
+            logging.info(f"CapMonster task created: {task_id}")
+
+            # 2) Poll for the solution
+            result_payload = {"clientKey": CAPMONSTER_API_KEY, "taskId": task_id}
+            for _ in range(20):  # poll up to ~60 seconds total (3s * 20)
+                await asyncio.sleep(3)  # wait 3s between polls
+                result_resp = await session.post("https://api.capmonster.cloud/getTaskResult", json=result_payload)
+                result_data = await result_resp.json()
+
+                if result_data.get("errorId") != 0:
+                    logging.error(f"CapMonster getTaskResult error: {result_data.get('errorDescription')}")
+                    return None
+
+                if result_data.get("status") == "processing":
+                    continue  # not ready yet
+
+                if result_data.get("status") == "ready":
+                    solution = result_data.get("solution", {}).get("gRecaptchaResponse")
+                    if solution:
+                        logging.info("Captcha solved via CapMonster")
+                        return solution
+                    else:
+                        logging.error("CapMonster returned no solution")
+                        return None
+
+            logging.error("CapMonster solve timed out (no solution after ~60s)")
+            return None
+
+    except Exception as e:
+        logging.error(f"Exception during captcha solving: {e}")
+        return None
+
+# ----------------------------------------------------
+# DISCORD BOT CLASS
+# ----------------------------------------------------
 
 class Discord:
     """
@@ -149,21 +228,58 @@ class Discord:
             async with ClientSession(headers=headers) as client:
                 async with client.post(url, json={}) as response:
                     resp_json = await response.json()
+
+                    # If a captcha is required to join
+                    if "captcha_sitekey" in resp_json:
+                        logging.info(f"Captcha required for joining server, solving via CapMonster... ({token[:20]}...)")
+                        sitekey = resp_json.get("captcha_sitekey")
+                        rqtoken = resp_json.get("captcha_rqtoken")
+                        rqdata = resp_json.get("captcha_rqdata")
+
+                        captcha_solution = await solve_hcaptcha(sitekey, "https://discord.com", rqdata)
+                        if captcha_solution:
+                            # Retry the join with the solved captcha token
+                            payload = {"captcha_key": captcha_solution, "captcha_rqtoken": rqtoken}
+                            async with client.post(url, json=payload) as resp2:
+                                resp2_json = await resp2.json()
+                                if resp2.status == 200:
+                                    # Joined successfully after captcha solve
+                                    self.guild_name = resp2_json["guild"]["name"]
+                                    self.guild_id = resp2_json["guild"]["id"]
+                                    self.channel_id = resp2_json["channel"]["id"]
+                                    logging.info(
+                                        f"Successfully joined {self.guild_name[:20]} "
+                                        f"(Token {token[:59]}) [Captcha solved]"
+                                    )
+                                else:
+                                    logging.error(
+                                        f"Failed to join after captcha solve (status {resp2.status}): {resp2_json}"
+                                    )
+                                    self.tokens.remove(token)
+                        else:
+                            logging.error(
+                                f"Could not solve join captcha for token {token[:20]}..., skipping token"
+                            )
+                            self.tokens.remove(token)
+                        return  # exit after handling captcha success/fail
+
+                    # If no captcha prompt, proceed with normal checks
                     if response.status == 200:
                         self.guild_name = resp_json["guild"]["name"]
                         self.guild_id = resp_json["guild"]["id"]
                         self.channel_id = resp_json["channel"]["id"]
-                        logging.info(f"Successfully joined {self.guild_name[:20]} \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Successfully joined {self.guild_name[:20]} ({token[:59]})")
                     elif response.status in (401, 403):
-                        logging.info(f"Invalid/Locked account \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Invalid/Locked account ({token[:59]})")
                         self.tokens.remove(token)
                     elif response.status == 429:
-                        logging.info(f"Ratelimited \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Ratelimited ({token[:59]})")
                         await asyncio.sleep(self.delay)
                         self.tokens.remove(token)
                     else:
                         self.tokens.remove(token)
         except Exception:
+            # Retry on generic error
             await self.join(token)
 
     async def create_dm(self, token: str, user: str) -> str | bool:
@@ -183,14 +299,11 @@ class Discord:
                         )
                         return resp_json["id"]
                     elif response.status in (401, 403):
-                        logging.info(
-                            f"Invalid account or cannot message user "
-                            f"\x1b[38;5;9m({token[:59]})\x1b[0m"
-                        )
+                        logging.info(f"Invalid account or cannot message user ({token[:59]})")
                         self.tokens.remove(token)
                         return False
                     elif response.status == 429:
-                        logging.info(f"Ratelimited \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Ratelimited ({token[:59]})")
                         await asyncio.sleep(self.delay)
                         return await self.create_dm(token, user)
                     else:
@@ -201,6 +314,7 @@ class Discord:
     async def direct_message(self, token: str, channel: str) -> bool:
         """
         Sends a direct message to a specified channel.
+        Returns False if sending fails, or None on success.
         """
         try:
             headers = await self.headers(token)
@@ -209,25 +323,57 @@ class Discord:
             async with ClientSession(headers=headers) as client:
                 async with client.post(url, json=payload) as response:
                     resp_json = await response.json()
+
+                    # If a captcha is required for DM
+                    if "captcha_sitekey" in resp_json:
+                        logging.info(f"Captcha required for DM, solving via CapMonster... ({token[:20]}...)")
+                        sitekey = resp_json.get("captcha_sitekey")
+                        rqtoken = resp_json.get("captcha_rqtoken")
+                        rqdata = resp_json.get("captcha_rqdata")
+
+                        captcha_solution = await solve_hcaptcha(sitekey, "https://discord.com", rqdata)
+                        if captcha_solution:
+                            # Retry sending the message with captcha solution
+                            payload["captcha_key"] = captcha_solution
+                            payload["captcha_rqtoken"] = rqtoken
+                            async with client.post(url, json=payload) as resp2:
+                                resp2_json = await resp2.json()
+                                if resp2.status == 200:
+                                    logging.info(f"Successfully sent DM (Token {token[:59]}) [Captcha solved]")
+                                    return  # success (no return value => None)
+                                else:
+                                    logging.error(
+                                        f"Failed to send DM after captcha solve (status {resp2.status}): {resp2_json}"
+                                    )
+                                    self.tokens.remove(token)
+                                    return False
+                        else:
+                            logging.error(
+                                f"Could not solve DM captcha for token {token[:20]}..., skipping token"
+                            )
+                            self.tokens.remove(token)
+                            return False
+
+                    # No captcha -> normal checks
                     if response.status == 200:
-                        logging.info(f"Successfully sent message \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Successfully sent message ({token[:59]})")
                     elif response.status == 401:
-                        logging.info(f"Invalid account \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Invalid account ({token[:59]})")
                         self.tokens.remove(token)
                         return False
                     elif response.status == 403:
                         if resp_json.get("code") == 40003:
-                            logging.info(f"Ratelimited \x1b[38;5;9m({token[:59]})\x1b[0m")
+                            logging.info(f"Ratelimited ({token[:59]})")
                             await asyncio.sleep(self.delay)
                             return await self.direct_message(token, channel)
                         elif resp_json.get("code") == 50007:
-                            logging.info(f"User has DMs disabled \x1b[38;5;9m({token[:59]})\x1b[0m")
+                            logging.info(f"User has DMs disabled ({token[:59]})")
                         elif resp_json.get("code") == 40002:
-                            logging.info(f"Locked account \x1b[38;5;9m({token[:59]})\x1b[0m")
+                            logging.info(f"Locked account ({token[:59]})")
                             self.tokens.remove(token)
                             return False
                     elif response.status == 429:
-                        logging.info(f"Ratelimited \x1b[38;5;9m({token[:59]})\x1b[0m")
+                        logging.info(f"Ratelimited ({token[:59]})")
                         await asyncio.sleep(self.delay)
                         return await self.direct_message(token, channel)
                     else:
