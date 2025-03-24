@@ -50,7 +50,8 @@ async def solve_hcaptcha(site_key: str, page_url: str, rqdata: str = None) -> st
         task_payload = {
             "clientKey": CAPMONSTER_API_KEY,
             "task": {
-                "type": "HCaptchaTaskProxyless",
+                # Changed task type to HCaptchaTask for compatibility.
+                "type": "HCaptchaTask",
                 "websiteURL": page_url,
                 "websiteKey": site_key
             }
@@ -70,7 +71,7 @@ async def solve_hcaptcha(site_key: str, page_url: str, rqdata: str = None) -> st
                 json=task_payload,
                 headers={"Content-Type": "application/json"}
             )
-            # Force JSON parsing even if content type is not application/json
+            # Force JSON decoding even if the response mimetype is not application/json.
             create_data = await create_resp.json(content_type=None)
             if create_data.get("errorId") != 0:
                 logging.error(f"CapMonster createTask error: {create_data.get('errorDescription')}")
@@ -217,6 +218,7 @@ class Discord:
                         await self.login(token)
         except Exception:
             await self.login(token)
+
     async def join(self, token: str) -> None:
         """
         Attempts to join a Discord server using an invite code.
@@ -309,6 +311,7 @@ class Discord:
                         return False
         except Exception:
             return await self.create_dm(token, user)
+
     async def direct_message(self, token: str, channel: str) -> bool:
         """
         Sends a direct message to a specified channel.
@@ -451,6 +454,7 @@ class Discord:
                         await asyncio.sleep(self.delay)
                 else:
                     self.stop()
+
 if __name__ == "__main__":
     # =====================
     # Remove or comment out the lines below – they call start.bat and cause issues on Linux:
