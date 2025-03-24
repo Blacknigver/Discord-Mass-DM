@@ -70,7 +70,8 @@ async def solve_hcaptcha(site_key: str, page_url: str, rqdata: str = None) -> st
                 json=task_payload,
                 headers={"Content-Type": "application/json"}
             )
-            create_data = await create_resp.json()
+            # Force JSON parsing even if content type is not application/json
+            create_data = await create_resp.json(content_type=None)
             if create_data.get("errorId") != 0:
                 logging.error(f"CapMonster createTask error: {create_data.get('errorDescription')}")
                 return None
@@ -86,7 +87,7 @@ async def solve_hcaptcha(site_key: str, page_url: str, rqdata: str = None) -> st
                     json=result_payload,
                     headers={"Content-Type": "application/json"}
                 )
-                result_data = await result_resp.json()
+                result_data = await result_resp.json(content_type=None)
 
                 if result_data.get("errorId") != 0:
                     logging.error(f"CapMonster getTaskResult error: {result_data.get('errorDescription')}")
